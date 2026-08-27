@@ -54,6 +54,14 @@ import KimiComboPresetCard from "./KimiComboPresetCard";
 import { KIMI_CODING_PRESET, hasKimiCodingPreset } from "./kimiComboPreset";
 import BuilderIntelligentStep from "./BuilderIntelligentStep";
 import IntelligentComboPanel from "./IntelligentComboPanel";
+import { ComboSortSelect } from "./ComboSortSelect";
+import {
+  sortComboStepsSync,
+  sortComboStepsByScore,
+  fetchProviderRankings,
+  type SortMethod,
+} from "@/lib/combos/comboSort";
+import type { ComboStep } from "@/lib/combos/steps";
 import {
   filterCombosByStrategyCategory,
   getStrategyCategory,
@@ -2026,6 +2034,8 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
   const [builderStage, setBuilderStage] = useState<string>(COMBO_BUILDER_STAGES[0]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [config, setConfig] = useState(sanitizeComboRuntimeConfig(combo?.config));
+  const initialSortMethod = (config.modelSort?.method ?? "manual") as SortMethod;
+  const [sortMethod, setSortMethod] = useState<SortMethod>(initialSortMethod);
   const [showStrategyNudge, setShowStrategyNudge] = useState(false);
   const strategyChangeMountedRef = useRef(false);
   // Agent features (#399 / #401 / #454)
@@ -2065,6 +2075,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
       setModels((nextCombo?.models || []).map((m) => normalizeModelEntry(m)));
       setStrategy(nextCombo?.strategy || comboDefaults?.strategy || "priority");
       setConfig(nextConfig);
+      setSortMethod((nextConfig.modelSort?.method ?? "manual") as SortMethod);
       setShowAdvanced(isExpertMode);
       setNameError("");
       setContextLengthError("");
@@ -2785,6 +2796,19 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
     setModels(newModels);
   };
 
+  const handleSortChange = async (next: SortMethod) => {
+    setSortMethod(next);
+    setConfig((prev) => ({ ...prev, modelSort: { method: next } }));
+    if (next === "manual") return;
+    if (next === "score") {
+      const rankings = await fetchProviderRankings();
+      const sorted = await sortComboStepsByScore(models as ComboStep[], rankings);
+      setModels(sorted as typeof models);
+      return;
+    }
+    setModels((prev) => sortComboStepsSync(prev as ComboStep[], next) as typeof prev);
+  };
+
   // Drag and Drop handlers
   const handleDragStart = (e, index) => {
     setDragIndex(index);
@@ -3482,6 +3506,10 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
                     {builderError}
                   </div>
                 )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 mb-2">
+                <ComboSortSelect value={sortMethod} onChange={handleSortChange} t={t} />
               </div>
 
               {models.length === 0 ? (
