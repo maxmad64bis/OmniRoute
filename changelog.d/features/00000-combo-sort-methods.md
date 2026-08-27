@@ -1,1 +1,0 @@
-- **feat(combo):** choose how combo models are ordered — manual, provider, score, or name — via a sort control in the dashboard builder, persisted in `config.modelSort` and re-applied on load and after add ([#00000](https://github.com/diegosouzapw/OmniRoute/pull/00000)) — thanks @maxmad64bis
