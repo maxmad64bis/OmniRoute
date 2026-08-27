@@ -2036,6 +2036,10 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
   const [config, setConfig] = useState(sanitizeComboRuntimeConfig(combo?.config));
   const initialSortMethod = (config.modelSort?.method ?? "manual") as SortMethod;
   const [sortMethod, setSortMethod] = useState<SortMethod>(initialSortMethod);
+  const modelsRef = useRef(models);
+  useEffect(() => {
+    modelsRef.current = models;
+  }, [models]);
   const [showStrategyNudge, setShowStrategyNudge] = useState(false);
   const strategyChangeMountedRef = useRef(false);
   // Agent features (#399 / #401 / #454)
@@ -2648,8 +2652,13 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
     if (sortMethod === "manual") {
       setModels(added);
     } else if (sortMethod === "score") {
-      const rankings = await fetchProviderRankings();
-      setModels(await sortComboStepsByScore(added, rankings));
+      try {
+        const rankings = await fetchProviderRankings();
+        const sorted = await sortComboStepsByScore(added, rankings);
+        setModels(sorted);
+      } catch {
+        setModels(added);
+      }
     } else {
       setModels(sortComboStepsSync(added, sortMethod));
     }
@@ -2686,8 +2695,13 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
     if (sortMethod === "manual") {
       setModels(next);
     } else if (sortMethod === "score") {
-      const rankings = await fetchProviderRankings();
-      setModels(await sortComboStepsByScore(next, rankings));
+      try {
+        const rankings = await fetchProviderRankings();
+        const sorted = await sortComboStepsByScore(next, rankings);
+        setModels(sorted);
+      } catch {
+        setModels(next);
+      }
     } else {
       setModels(sortComboStepsSync(next, sortMethod));
     }
@@ -2828,9 +2842,18 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
     setConfig((prev) => ({ ...prev, modelSort: { method: next } }));
     if (next === "manual") return;
     if (next === "score") {
-      const rankings = await fetchProviderRankings();
-      const sorted = await sortComboStepsByScore(models as ComboStep[], rankings);
-      setModels(sorted as typeof models);
+      try {
+        const rankings = await fetchProviderRankings();
+        // Capture snapshot; if a concurrent add lands while rankings fetch
+        // is in flight, modelsRef has the freshest value — prefer it at
+        // sort time. Single-user UI, low-probability race; fallback keeps
+        // previous models if the rankings fetch fails (mirrors load path).
+        const snapshot = (modelsRef.current ?? models) as ComboStep[];
+        const sorted = await sortComboStepsByScore(snapshot, rankings);
+        setModels(sorted as typeof models);
+      } catch {
+        // Keep previous models; same silent-fallback precedent as load path.
+      }
       return;
     }
     setModels((prev) => sortComboStepsSync(prev as ComboStep[], next) as typeof prev);
