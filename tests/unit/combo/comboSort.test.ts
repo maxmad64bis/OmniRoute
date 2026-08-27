@@ -1,7 +1,13 @@
 // tests/unit/combo/comboSort.test.ts
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { PROVIDER_ORDER, sortComboStepsSync, type ComboStep } from "@/lib/combos/comboSort";
+import {
+  PROVIDER_ORDER,
+  sortComboStepsSync,
+  sortComboStepsByScore,
+  reapplyCurrentSort,
+  type ComboStep,
+} from "@/lib/combos/comboSort";
 
 const m = (id: string, providerId: string, model: string): ComboStep => ({
   id,
@@ -52,5 +58,39 @@ describe("sortComboStepsSync", () => {
 
   it("PROVIDER_ORDER is non-empty and stable", () => {
     assert.ok(PROVIDER_ORDER.length > 0);
+  });
+});
+
+describe("score sort", () => {
+  it("sorts scored steps descending, unscored stable at end", async () => {
+    const steps = [
+      m("a", "openai", "gpt"), // score 90
+      m("b", "anthropic", "claude"), // no score
+      m("c", "google", "gemini"), // score 70
+      ref("r", "other"), // no providerId
+    ];
+    const rankings = new Map<string, number>([
+      ["openai", 90],
+      ["google", 70],
+    ]);
+    const out = await sortComboStepsByScore(steps, rankings);
+    assert.deepEqual(
+      out.map((s) => s.id),
+      ["a", "c", "b", "r"]
+    );
+  });
+
+  it("reapplyCurrentSort applies score async and sync methods", async () => {
+    const steps = [m("a", "openai", "gpt"), m("b", "claude", "claude")];
+    const syncOut = await reapplyCurrentSort(steps, "provider");
+    assert.deepEqual(
+      syncOut.map((s) => s.id),
+      ["b", "a"]
+    ); // claude (anthropic) before openai
+    const rankOut = await reapplyCurrentSort(steps, "score", async () => new Map([["openai", 5]]));
+    assert.deepEqual(
+      rankOut.map((s) => s.id),
+      ["a", "b"]
+    );
   });
 });

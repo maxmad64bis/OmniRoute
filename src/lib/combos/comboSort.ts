@@ -55,3 +55,52 @@ export function sortComboStepsSync(
   });
   return indexed.map((x) => x.step);
 }
+
+export type Rankings = Map<string, number> | Record<string, number>;
+
+function toMap(rankings: Rankings): Map<string, number> {
+  return rankings instanceof Map ? rankings : new Map(Object.entries(rankings));
+}
+
+/** Steps with a ranking sort descending by score; steps without a score stay
+ *  stable at the end (including combo-ref, which has no providerId). */
+export async function sortComboStepsByScore(
+  steps: ComboStep[],
+  rankings: Rankings
+): Promise<ComboStep[]> {
+  const map = toMap(rankings);
+  const indexed = steps.map((step, i) => {
+    const pid =
+      step.kind === "model" || step.kind === "provider-wildcard" ? step.providerId : undefined;
+    const score = pid ? map.get(pid) : undefined;
+    return { step, i, score: score ?? -1 };
+  });
+  indexed.sort((a, b) => {
+    if (a.score !== b.score) return b.score - a.score; // desc, -1 (unscored) last
+    return a.i - b.i;
+  });
+  return indexed.map((x) => x.step);
+}
+
+/** Client-side rankings source for the dashboard (provider-level averageScore). */
+export async function fetchProviderRankings(): Promise<Map<string, number>> {
+  const res = await fetch("/api/free-provider-rankings");
+  if (!res.ok) throw new Error(`free-provider-rankings ${res.status}`);
+  const data = (await res.json()) as { rankings: Array<{ id: string; averageScore: number }> };
+  return new Map(data.rankings.map((r) => [r.id, r.averageScore]));
+}
+
+/** Re-apply the current method to a models array. Sync for manual/provider/name,
+ *  async for score (fetches rankings when getRankings is provided). */
+export async function reapplyCurrentSort(
+  steps: ComboStep[],
+  method: SortMethod,
+  getRankings?: () => Promise<Rankings>
+): Promise<ComboStep[]> {
+  if (method === "manual") return steps;
+  if (method === "score") {
+    const rankings = getRankings ? await getRankings() : new Map<string, number>();
+    return sortComboStepsByScore(steps, rankings);
+  }
+  return sortComboStepsSync(steps, method);
+}
