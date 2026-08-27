@@ -93,4 +93,20 @@ describe("score sort", () => {
       ["a", "b"]
     );
   });
+
+  it("reapplyCurrentSort after an add keeps provider grouping", async () => {
+    const base = [m("a", "anthropic", "claude")];
+    const added = [...base, m("b", "openai", "gpt")];
+    const out = await reapplyCurrentSort(added, "provider");
+    // Expected order derived from PROVIDER_ORDER (robust to provider precedence).
+    const expected = ["a", "b"].sort((x, y) => {
+      const px = x === "a" ? "anthropic" : "openai";
+      const py = y === "a" ? "anthropic" : "openai";
+      return PROVIDER_ORDER.indexOf(px) - PROVIDER_ORDER.indexOf(py);
+    });
+    assert.deepEqual(
+      out.map((s) => s.id),
+      expected
+    );
+  });
 });

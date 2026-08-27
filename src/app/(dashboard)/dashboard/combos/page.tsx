@@ -2075,7 +2075,19 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
       setModels((nextCombo?.models || []).map((m) => normalizeModelEntry(m)));
       setStrategy(nextCombo?.strategy || comboDefaults?.strategy || "priority");
       setConfig(nextConfig);
-      setSortMethod((nextConfig.modelSort?.method ?? "manual") as SortMethod);
+      const loadedMethod = (nextCombo?.config?.modelSort?.method ?? "manual") as SortMethod;
+      setSortMethod(loadedMethod);
+      if (loadedMethod !== "manual") {
+        const base = (nextCombo?.models || []).map((mm) => normalizeModelEntry(mm)) as ComboStep[];
+        if (loadedMethod === "score") {
+          fetchProviderRankings()
+            .then((rk) => sortComboStepsByScore(base, rk))
+            .then((sorted) => setModels(sorted as typeof base))
+            .catch(() => setModels(base));
+        } else {
+          setModels(sortComboStepsSync(base, loadedMethod));
+        }
+      }
       setShowAdvanced(isExpertMode);
       setNameError("");
       setContextLengthError("");
@@ -2608,7 +2620,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
     setBuilderError("");
   };
 
-  const handleAddModel = (model) => {
+  const handleAddModel = async (model) => {
     const qualifiedModel = typeof model?.value === "string" ? model.value : "";
     const parsedModel = parseQualifiedModel(qualifiedModel);
     const resolvedProviderId =
@@ -2632,7 +2644,15 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
       );
       return;
     }
-    setModels([...models, nextEntry]);
+    const added = [...models, nextEntry];
+    if (sortMethod === "manual") {
+      setModels(added);
+    } else if (sortMethod === "score") {
+      const rankings = await fetchProviderRankings();
+      setModels(await sortComboStepsByScore(added, rankings));
+    } else {
+      setModels(sortComboStepsSync(added, sortMethod));
+    }
     setBuilderError("");
   };
 
@@ -2660,10 +2680,17 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
   // would each close over the same stale `models` snapshot and keep only the
   // last entry. Extracted so tests exercise this real implementation instead
   // of a hand-maintained mirror (#8526).
-  const handleAddModels = (selected) => {
+  const handleAddModels = async (selected) => {
     const { next, addedAny } = computeBatchAddModelSteps(models, selected, builderProviders);
     if (!addedAny) return;
-    setModels(next);
+    if (sortMethod === "manual") {
+      setModels(next);
+    } else if (sortMethod === "score") {
+      const rankings = await fetchProviderRankings();
+      setModels(await sortComboStepsByScore(next, rankings));
+    } else {
+      setModels(sortComboStepsSync(next, sortMethod));
+    }
     setBuilderError("");
   };
 
