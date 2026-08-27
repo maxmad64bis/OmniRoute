@@ -6,7 +6,19 @@ export type { ComboStep };
 
 export type SortMethod = "manual" | "provider" | "score" | "name";
 
-/** Canonical provider precedence, keyed by provider id (mirrors catalogOrder.ts). */
+export const SORT_METHODS: readonly SortMethod[] = ["manual", "provider", "score", "name"] as const;
+const VALID_SORT_METHODS = new Set<string>(SORT_METHODS as readonly string[]);
+
+export function normalizeSortMethod(raw: unknown): SortMethod {
+  return VALID_SORT_METHODS.has(raw as string) ? (raw as SortMethod) : "manual";
+}
+
+export function isValidSortMethod(raw: unknown): raw is SortMethod {
+  return VALID_SORT_METHODS.has(raw as string);
+}
+
+// Mirrors CANONICAL_PROVIDER_ORDER from src/app/api/v1/models/catalogOrder.ts — keep in sync.
+// Both are derived from OAUTH+NOAUTH+APIKEY keys; drift would silently diverge catalog vs combo order.
 export const PROVIDER_ORDER: readonly string[] = [
   ...Object.keys(OAUTH_PROVIDERS),
   ...Object.keys(NOAUTH_PROVIDERS),

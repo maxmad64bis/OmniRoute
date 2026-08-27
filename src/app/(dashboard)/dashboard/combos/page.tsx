@@ -59,6 +59,8 @@ import {
   sortComboStepsSync,
   sortComboStepsByScore,
   fetchProviderRankings,
+  normalizeSortMethod,
+  isValidSortMethod,
   type SortMethod,
 } from "@/lib/combos/comboSort";
 import type { ComboStep } from "@/lib/combos/steps";
@@ -2034,12 +2036,25 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
   const [builderStage, setBuilderStage] = useState<string>(COMBO_BUILDER_STAGES[0]);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [config, setConfig] = useState(sanitizeComboRuntimeConfig(combo?.config));
-  const initialSortMethod = (config.modelSort?.method ?? "manual") as SortMethod;
+  // Validate persisted enum; ensure reset on combo change not just first mount.
+  const initialSortMethod = normalizeSortMethod(config.modelSort?.method);
   const [sortMethod, setSortMethod] = useState<SortMethod>(initialSortMethod);
+  useEffect(() => {
+    // Sync point: when the combo identity changes, re-derive sort method.
+    // Manual edits via handleSortChange already set sortMethod inside resetFormForCombo,
+    // but this guards the case where the modal is reused (edit-A→close→edit-B without unmount).
+    setSortMethod(normalizeSortMethod(combo?.config?.modelSort?.method));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [combo?.id]);
   const modelsRef = useRef(models);
+  const sortMethodRef = useRef<SortMethod>(sortMethod);
+  const resetSortGenerationRef = useRef(0);
   useEffect(() => {
     modelsRef.current = models;
   }, [models]);
+  useEffect(() => {
+    sortMethodRef.current = sortMethod;
+  }, [sortMethod]);
   const [showStrategyNudge, setShowStrategyNudge] = useState(false);
   const strategyChangeMountedRef = useRef(false);
   // Agent features (#399 / #401 / #454)
@@ -2074,24 +2089,36 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
             Object.fromEntries(Object.entries(nextDefaults).filter(([key]) => key !== "strategy"))
           );
 
+      // Validate persisted enum; tolerate hand-edited DB values.
+      const loadedMethod = normalizeSortMethod(nextCombo?.config?.modelSort?.method);
+      // Generation guard so a stale score fetch can't clobber the next combo.
+      const myGen = ++resetSortGenerationRef.current;
+      setSortMethod(loadedMethod);
+      sortMethodRef.current = loadedMethod;
       setName(nextCombo?.name || "");
       setDescription(nextCombo?.description || "");
-      setModels((nextCombo?.models || []).map((m) => normalizeModelEntry(m)));
+      // Branch so only one setModels runs (no raw-then-sorted double set).
+      // Score branch is async; guard with generation + cancelled from the caller's effect.
+      if (loadedMethod === "manual") {
+        setModels((nextCombo?.models || []).map((m) => normalizeModelEntry(m)));
+      } else if (loadedMethod === "score") {
+        const base = (nextCombo?.models || []).map((mm) => normalizeModelEntry(mm)) as ComboStep[];
+        fetchProviderRankings()
+          .then((rk) => sortComboStepsByScore(base, rk))
+          .then((sorted) => {
+            if (resetSortGenerationRef.current !== myGen) return;
+            setModels(sorted as typeof base);
+          })
+          .catch(() => {
+            if (resetSortGenerationRef.current !== myGen) return;
+            setModels(base);
+          });
+      } else {
+        const base = (nextCombo?.models || []).map((mm) => normalizeModelEntry(mm)) as ComboStep[];
+        setModels(sortComboStepsSync(base, loadedMethod));
+      }
       setStrategy(nextCombo?.strategy || comboDefaults?.strategy || "priority");
       setConfig(nextConfig);
-      const loadedMethod = (nextCombo?.config?.modelSort?.method ?? "manual") as SortMethod;
-      setSortMethod(loadedMethod);
-      if (loadedMethod !== "manual") {
-        const base = (nextCombo?.models || []).map((mm) => normalizeModelEntry(mm)) as ComboStep[];
-        if (loadedMethod === "score") {
-          fetchProviderRankings()
-            .then((rk) => sortComboStepsByScore(base, rk))
-            .then((sorted) => setModels(sorted as typeof base))
-            .catch(() => setModels(base));
-        } else {
-          setModels(sortComboStepsSync(base, loadedMethod));
-        }
-      }
       setShowAdvanced(isExpertMode);
       setNameError("");
       setContextLengthError("");
@@ -2625,6 +2652,9 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
   };
 
   const handleAddModel = async (model) => {
+    // Use refs to avoid stale closure when awaiting a score fetch.
+    const currentModels = (modelsRef.current ?? models) as typeof models;
+    const currentMethod = sortMethodRef.current;
     const qualifiedModel = typeof model?.value === "string" ? model.value : "";
     const parsedModel = parseQualifiedModel(qualifiedModel);
     const resolvedProviderId =
@@ -2638,7 +2668,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
       ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
       weight: 0,
     };
-    if (hasExactModelStepDuplicate(models, nextEntry)) {
+    if (hasExactModelStepDuplicate(currentModels, nextEntry)) {
       setBuilderError(
         getI18nOrFallback(
           t,
@@ -2648,19 +2678,20 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
       );
       return;
     }
-    const added = [...models, nextEntry];
-    if (sortMethod === "manual") {
+    const added = [...currentModels, nextEntry];
+    if (currentMethod === "manual") {
       setModels(added);
-    } else if (sortMethod === "score") {
+    } else if (currentMethod === "score") {
       try {
         const rankings = await fetchProviderRankings();
+        // Single-user modal; rapid double-add while fetch is in flight is low-probability.
         const sorted = await sortComboStepsByScore(added, rankings);
         setModels(sorted);
       } catch {
         setModels(added);
       }
     } else {
-      setModels(sortComboStepsSync(added, sortMethod));
+      setModels(sortComboStepsSync(added, currentMethod as "provider" | "name"));
     }
     setBuilderError("");
   };
@@ -2690,20 +2721,25 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
   // last entry. Extracted so tests exercise this real implementation instead
   // of a hand-maintained mirror (#8526).
   const handleAddModels = async (selected) => {
-    const { next, addedAny } = computeBatchAddModelSteps(models, selected, builderProviders);
+    // Same ref discipline as handleAddModel — don't rely on closed-over render snapshot.
+    const currentModels = (modelsRef.current ?? models) as typeof models;
+    const currentMethod = sortMethodRef.current;
+    const { next, addedAny } = computeBatchAddModelSteps(currentModels, selected, builderProviders);
     if (!addedAny) return;
-    if (sortMethod === "manual") {
+    if (currentMethod === "manual") {
       setModels(next);
-    } else if (sortMethod === "score") {
+    } else if (currentMethod === "score") {
       try {
         const rankings = await fetchProviderRankings();
+        // Functional note: `next` is the post-batch snapshot. Concurrent single-add
+        // racing this batch is low-probability single-user; last write wins.
         const sorted = await sortComboStepsByScore(next, rankings);
         setModels(sorted);
       } catch {
         setModels(next);
       }
     } else {
-      setModels(sortComboStepsSync(next, sortMethod));
+      setModels(sortComboStepsSync(next, currentMethod as "provider" | "name"));
     }
     setBuilderError("");
   };
@@ -2838,7 +2874,9 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, combo
   };
 
   const handleSortChange = async (next: SortMethod) => {
+    if (!isValidSortMethod(next)) return;
     setSortMethod(next);
+    sortMethodRef.current = next;
     setConfig((prev) => ({ ...prev, modelSort: { method: next } }));
     if (next === "manual") return;
     if (next === "score") {
