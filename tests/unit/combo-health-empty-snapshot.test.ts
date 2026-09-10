@@ -1,6 +1,5 @@
-// tests/unit/combo-health-empty-snapshot.test.ts — pattern db-quota-snapshots.test.ts:7-26 :
-// isolation DB réelle, zéro mock (mock.module indisponible sous tsx/ESM ; sans polyfill+isolateDataDir,
-// DATA_DIR tombe sur ~/.omniroute réel → flaky).
+// Real isolated DB, no mocks (same setup as db-quota-snapshots.test.ts): mock.module is not
+// available under tsx/ESM, and without an isolated DATA_DIR the run would touch ~/.omniroute.
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -47,7 +46,7 @@ test("empty snapshots read null, not 0%, and stay non-exhausted", () => {
   assert.equal(h.trend, "stable");
 });
 
-test("all-null percentages read null (B3)", () => {
+test("all-null percentages read null", () => {
   quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: null });
   quotaSnapshotsDb.saveQuotaSnapshot({ ...SNAP, remaining_percentage: null });
   const q = buildQuotaHealth(["openrouter"], "1970-01-01T00:00:00.000Z");

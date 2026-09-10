@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// ComboHealthTab fetch "/api/usage/combo-health-dashboard?range=${range}&horizon=${horizon}" (ComboHealthTab.tsx:817-820) au mount ;
-// on intercepte global.fetch et on monte le composant réel.
+// ComboHealthTab fetches /api/usage/combo-health-dashboard on mount; stub global.fetch and
+// mount the real component.
 import React from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -28,8 +28,8 @@ const NULL_COMBO = {
   usageSkew: { modelDistribution: [], giniCoefficient: 0 },
   performance: { avgLatencyMs: 0, successRate: 0, totalRequests: 0 },
 };
-// Enveloppe réelle lue par ComboHealthTab.tsx:828-836 : result.health + result.errors
-// (pas {combos:[…]} — sinon setData(undefined), liste vide, jamais de n/a).
+// ComboHealthTab reads a { health, errors } envelope; a bare { combos } payload would leave
+// the list empty and never render n/a.
 const NULL_PAYLOAD = {
   health: { timeRange: "24h", combos: [NULL_COMBO] },
   forecast: null,
@@ -65,9 +65,8 @@ describe("combo health null quota", () => {
     await act(async () => {
       root.render(<ComboHealthTab />);
     });
-    // Assertion scopée à la section quota (C1) : le bloc perf rend "0.0%" légitime
-    // via formatPercent(successRate*100) même post-fix — un not.toContain("0%") global
-    // serait un faux-positif permanent.
+    // Scoped to the quota section: the performance block legitimately renders "0.0%" via
+    // formatPercent(successRate * 100), so a page-wide not.toContain("0%") would always fail.
     const quotaSection = el.querySelector("section") as HTMLElement | null;
     const quotaText = quotaSection?.textContent ?? "";
     expect(quotaText).toContain("n/a");
