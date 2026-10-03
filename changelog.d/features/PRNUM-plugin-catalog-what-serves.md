@@ -1,0 +1,1 @@
+- **feat(plugin):** publish useful models by default, full catalog on request ([#PRNUM](https://github.com/diegosouzapw/OmniRoute/pull/PRNUM)) — thanks @maxmad64bis
