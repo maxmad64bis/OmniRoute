@@ -1,0 +1,1 @@
+- **fix(open-sse):** a replayed shape refusal reuses the verdict read once instead of reading the refused body again ([#PRNUM](https://github.com/diegosouzapw/OmniRoute/pull/PRNUM)) — thanks @maxmad64bis
