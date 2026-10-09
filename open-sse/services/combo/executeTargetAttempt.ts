@@ -519,9 +519,14 @@ export async function executeTargetAttempt(opts: {
 
       // Reset cooldown on success
       if (provider && provider !== "unknown") {
-        recordProviderSuccess(provider, effectiveConnectionId || undefined, {
-          providerProbeSettled: isProviderProbeResponse(result),
-        });
+        recordProviderSuccess(
+          provider,
+          effectiveConnectionId || undefined,
+          {
+            providerProbeSettled: isProviderProbeResponse(result),
+          },
+          deps.log
+        );
       }
       if (deps.strategy === "weighted" && (deps.stickyWeightedLimit ?? 0) > 1) {
         const stickySuccessKey = deps.getWeightedStepKeyForTarget?.(target);
